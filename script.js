@@ -1,612 +1,299 @@
-/**
- * Soma FM Web Player
- * Author: Rainner Lins (2018)
- * Site: https://rainnerlins.com/
- */
+// Mythium Archive: https://archive.org/details/mythium/
 
-//               .andAHHAbnn.
-//            .aAHHHAAUUAAHHHAn.
-//           dHP^~"        "~^THb.
-//     .   .AHF                YHA.   .
-//     |  .AHHb.              .dHHA.  |
-//     |  HHAUAAHAbn      adAHAAUAHA  |
-//     I  HF~"_____        ____ ]HHH  I
-//    HHI HAPK""~^YUHb  dAHHHHHHHHHH IHH
-//    HHI HHHD> .andHH  HHUUP^~YHHHH IHH
-//    YUI ]HHP     "~Y  P~"     THH[ IUP
-//     "  `HK                   ]HH'  "
-//         THAn.  .d.aAAn.b.  .dHHP
-//         ]HHHHAAUP" ~~ "YUAAHHHH[
-//         `HHP^~"  .annn.  "~^YHH'
-//          YHb    ~" "" "~    dHF
-//           "YAb..abdHHbndbndAP"
-//            THHAAb.  .adAHHF
-//             "UHHHHHHHHHHU"
-//               ]HHUUHHHHHH[
-//             .adHHb "HHHHHbn.
-//      ..andAAHHHHHHb.AHHHHHHHAAbnn..
-// .ndAAHHHHHHUUHHHHHHHHHHUP^~"~^YUHHHAAbn.
-//   "~^YUHHP"   "~^YUHHUP"        "^YUP^"
-//        ""         "~~"
-
-/**
- * Sphere object
- */
-const Sphere = {
-    group  : null,
-    shapes : [],
-    move   : new THREE.Vector3( 0, 0, 0 ),
-    ease   : 8,
-  
-    create( box, scene ) {
-      this.group   = new THREE.Object3D();
-      let shape1   = new THREE.CircleGeometry( 1, 10 );
-      let shape2   = new THREE.CircleGeometry( 2, 20 );
-      let points   = new THREE.SphereGeometry( 100, 30, 14 ).vertices;
-      let material = new THREE.MeshLambertMaterial( { color: 0xffffff, opacity: 0, side: THREE.DoubleSide } );
-      let center   = new THREE.Vector3( 0, 0, 0 );
-      let radius   = 12;
-  
-      for ( let i = 0; i < points.length; i++ ) {
-        let { x, y, z } = points[ i ];
-        let home  = { x, y, z };
-        let cycle = THREE.Math.randInt( 0, 100 );
-        let pace  = THREE.Math.randInt( 10, 30 );
-        let shape = new THREE.Mesh( ( i % 2 ) ? shape1 : shape2, material );
-  
-        shape.position.set( x, y, z );
-        shape.lookAt( center );
-        shape.userData = { radius, cycle, pace, home };
-        this.group.add( shape );
-      }
-      this.group.position.set( 500, 0, 0 );
-      this.group.rotation.x = ( Math.PI / 2 ) + .6;
-      scene.add( this.group );
-    },
-  
-    update( box, mouse, freq ) {
-      let bass = ( Math.floor( freq[ 1 ] | 0 ) / 255 );
-      this.move.x = ( box.width * .06 ) + -( mouse.x * 0.02 );
-      this.group.position.x += ( this.move.x - this.group.position.x ) / this.ease;
-      this.group.position.y += ( this.move.y - this.group.position.y ) / this.ease;
-      this.group.position.z = 10 + ( bass * 80 );
-      this.group.rotation.y -= 0.003;
-  
-      for ( let i = 0; i < this.group.children.length; i++ ) {
-        let shape = this.group.children[ i ];
-        let { radius, cycle, pace, home } = shape.userData;
-        shape.position.set( home.x, home.y, home.z );
-        shape.translateZ( bass * Math.sin( cycle / pace ) * radius );
-        shape.userData.cycle++;
-      }
-    },
-  };
-  
-  /**
-   * Vue filters
-   */
-  Vue.filter( 'toCommas', ( num, decimals ) => {
-   let o = { style: 'decimal', minimumFractionDigits: decimals, maximumFractionDigits: decimals };
-   return new Intl.NumberFormat( 'en-US', o ).format( num );
-  });
-  Vue.filter( 'toSpaces', ( str ) => {
-   return String( str || '' ).trim().replace( /[^\w\`\'\-]+/g, ' ' ).trim();
-  });
-  Vue.filter( 'toText', ( str, def ) => {
-   str = String( str || '' ).replace( /[^\w\`\'\-\.\!\?]+/g, ' ' ).trim();
-   return str || String( def || '' );
-  });
-  
-  /**
-   * Vue app
-   */
-  new Vue({
-    el: '#app',
-    data: {
-      // toggles
-      init: false,
-      playing: false,
-      loading: false,
-      sidebar: false,
-      // channels stuff
-      channels: [], // all channels
-      channel: {},  // selected channel
-      songs: [],    // recent tracks
-      track: {},    // current track
-      errors: {},   // error messages
-      // animation stuff
-      fxBox: null,
-      fxRenderer: null,
-      fxScene: null,
-      fxColor: null,
-      fxLight: null,
-      fxCamera: null,
-      fxMouse: { x: 0, y: 0 },
-      fxObjects: [],
-      // audio stuff
-      audio: new Audio(),
-      context: new AudioContext(),
-      freqData: new Uint8Array(),
-      audioSrc: null,
-      audioGain: null,
-      analyser: null,
-      volume: 0.5,
-      // timer stuff
-      timeStart: 0,
-      timeDisplay: '00:00:00',
-      timeItv: null,
-      // sorting stuff
-      searchText: '',
-      sortParam: 'listeners',
-      sortOrder: 'desc',
-      // timer stuff
-      anf: null,
-      sto: null,
-      itv: null,
-    },
-  
-    // watch methods
-    watch: {
-  
-      // when app is ready
-      init() {
-        setTimeout( this.setupCanvas, 100 );
-        setTimeout( this.initSidebar, 500 );
-      },
-  
-      // watch playing status
-      playing() {
-        if ( this.playing ) { this.startClock(); }
-        else { this.stopClock(); }
-      },
-  
-      // update player volume
-      volume() {
-        this.setVolume( this.volume );
-      }
-    },
-  
-    // computed methods
-    computed: {
-  
-      // filter channels list
-      channelsList() {
-        let list = this.channels.slice();
-        let search = this.searchText.replace( /[^\w\s\-]+/g, '' ).replace( /[\r\s\t\n]+/g, ' ' ).trim();
-  
-        if ( search && search.length > 1 ) {
-          let reg = new RegExp( '^('+ search +')', 'i' );
-          list = list.filter( i => reg.test( i.title +' '+ i.description ) );
-        }
-        if ( this.sortParam ) {
-          list = this.sortList( list, this.sortParam, this.sortOrder );
-        }
-        if ( this.channel.id ) {
-          list = list.map( i => {
-            i.active = ( this.channel.id === i.id ) ? true : false;
-            return i;
-          });
-        }
-        return list;
-      },
-  
-      // filter songs list
-      songsList() {
-        let list = this.songs.slice();
-        return list;
-      },
-  
-      // sort-by label for buttons, etc
-      sortLabel() {
-        switch ( this.sortParam ) {
-          case 'title'     : return 'Station Name';
-          case 'listeners' : return 'Listeners Count';
-          case 'genre'     : return 'Music Genre';
-        }
-      },
-  
-      // check if audio can be played
-      canPlay() {
-        return ( this.channel.id && !this.loading ) ? true : false;
-      },
-  
-      // check if a channel is selected
-      hasChannel() {
-        return this.channel.id ? true : false;
-      },
-  
-      // check if there are tracks loaded
-      hasSongs() {
-        return this.songs.length ? true : false;
-      },
-  
-      // check if there are errors to show
-      hasErrors() {
-        return ( this.checkError( 'init' ) || this.checkError( 'stream' ) ) ? true : false;
-      },
-    },
-  
-    // custom methods
-    methods: {
-  
-      // set an erro message
-      setError( key, err ) {
-        let errors = Object.assign( {}, this.errors );
-        errors[ key ] = String( err || '' ).trim();
-        if ( err ) console.warn( 'ERROR('+ key +'):', err );
-        this.errors = errors;
-        this.init = true;
-      },
-  
-      // check if an error has been set for a key
-      checkError( key ) {
-        return ( key && this.errors.hasOwnProperty( key ) && this.errors[ key ] );
-      },
-  
-      // clear all error messages
-      clearErrors() {
-        Object.keys( this.errors ).forEach( key => {
-          this.errors[ key ] = '';
+jQuery(function ($) {
+    'use strict'
+    var supportsAudio = !!document.createElement('audio').canPlayType;
+    if (supportsAudio) {
+        // initialize plyr
+        var player = new Plyr('#audio1', {
+            controls: [
+                'restart',
+                'play',
+                'progress',
+                'current-time',
+                'duration',
+                'mute',
+                'volume',
+                'download'
+            ]
         });
-      },
-  
-      // reset selected channel
-      resetPlayer() {
-        this.channel = {};
-        this.songs = [];
-        this.clearErrors();
-        this.getChannels( true );
-      },
-  
-      // try resuming stream problem if possible
-      tryAgain() {
-        if ( this.checkError( 'init' ) ) return this.resetPlayer();
-        if ( this.channel.id ) return this.playChannel( this.channel );
-      },
-  
-      // show/hide the sidebar
-      toggleSidebar( toggle ) {
-        this.sidebar = ( typeof toggle === 'boolean' ) ? toggle : false;
-      },
-  
-      // show sidebar at startup if there are no errors
-      initSidebar() {
-        if ( this.checkError( 'init' ) ) return;
-        this.toggleSidebar( true );
-      },
-  
-      // toggle stream playback for current selected channel
-      togglePlay() {
-        if ( this.loading ) return;
-        if ( this.playing ) return this.closeAudio();
-        if ( this.channel.id ) return this.playChannel( this.channel );
-      },
-  
-      // toggle sort order
-      toggleSortOrder() {
-        this.sortOrder = ( this.sortOrder === 'asc' ) ? 'desc' : 'asc';
-      },
-  
-      // apply sorting and toggle order
-      sortBy( param, order ) {
-        if ( this.sortParam === param ) { this.toggleSortOrder(); }
-        else { this.sortOrder = order || 'asc'; }
-        this.sortParam = param;
-      },
-  
-      // sort an array by key and order
-      sortList( list, param, order ) {
-        return list.sort( ( a, b ) => {
-          if ( a.hasOwnProperty( param ) && b.hasOwnProperty( param ) ) {
-            let _a = a[ param ];
-            let _b = b[ param ];
-  
-            _a = ( typeof _a === 'string' ) ? _a.toUpperCase() : _a;
-            _b = ( typeof _b === 'string' ) ? _b.toUpperCase() : _b;
-  
-            if ( order === 'asc' ) {
-              if ( _a < _b ) return -1;
-              if ( _a > _b ) return 1;
-            }
-            if ( order === 'desc' ) {
-              if ( _a > _b ) return -1;
-              if ( _a < _b ) return 1;
-            }
-          }
-          return 0;
-        });
-      },
-  
-      // get channels data from api
-      getChannels( sidebar ) {
-        let endpoint = 'https://somafm.com/channels.json';
-        let emsg = [ 'There was a problem trying to load the list of available channels from SomaFM.' ];
-  
-        axios.get( endpoint ).then( res => {
-          if ( !res || !res.data || !res.data.channels ) {
-            emsg.push( 'The API response did not have any channels data available at this time.' );
-            emsg.push( 'Status: Channels API Error.' );
-            return this.setError( 'channels', emsg.join( ' ' ) );
-          }
-          for ( let c of res.data.channels ) {
-            if ( !Array.isArray( c.playlists ) ) continue;
-            // filter and sanitize list of channels
-            c.twitter   = c.twitter ? 'https://twitter.com/@'+ c.twitter : ''; // full twitter url
-            c.plsfile   = c.playlists.filter( p => ( p.format === 'mp3' && /^(highest|high)$/.test( p.quality ) ) ).shift().url || '';
-            c.mp3file   = 'http://ice1.somafm.com/'+ c.id +'-128-mp3'; // assumed stream url
-            c.songsurl  = 'https://somafm.com/songs/'+ c.id +'.json'; // songs data url
-            c.infourl   = 'https://somafm.com/'+ c.id +'/'; // channel page url
-            c.listeners = c.listeners | 0; // force numeric
-            c.updated   = c.updated | 0; // force numeric
-            c.active    = false; // select state
-            // update selected channel
-            if ( this.isCurrentChannel( c ) ) {
-              c.active = true;
-              this.channel = Object.assign( this.channel, c );
-            }
-          }
-          this.channels = res.data.channels.slice();
-          if ( sidebar ) this.toggleSidebar( true );
-          this.setError( 'init', '' );
-          this.setError( 'channels', '' );
-        })
-        .catch( e => {
-          emsg.push( 'Try again, or check your internet connection.' );
-          emsg.push( 'Status: '+ String( e.message || 'Channels API Error' ) +'.' );
-          let errstr = emsg.join( ' ' );
-          if ( !this.channels.length ) this.setError( 'init', errstr );
-          this.setError( 'channels', errstr );
-        });
-      },
-  
-      // fetch songs for a channel
-      fetchSongs( channel, cb ) {
-        if ( !channel || !channel.id || !channel.songsurl ) return;
-        if ( !this.isCurrentChannel( channel ) ) { this.songs = []; this.track = {}; }
-        let emsg = [ 'There was a problem trying to load the list of songs for channel '+ channel.title +' from SomaFM.' ];
-  
-        axios.get( channel.songsurl ).then( res => {
-          if ( !res || !res.data || !res.data.songs ) {
-            emsg.push( 'The API response did not have any songs data available at this time.' );
-            emsg.push( 'Status: Songs API Error.' );
-            return this.setError( 'songs', emsg.join( ' ' ) );
-          }
-          let songs  = res.data.songs.slice();
-          this.track = songs.shift();
-          this.songs = songs.slice( 0, 3 );
-          this.setError( 'songs', '' );
-          if ( typeof cb === 'function' ) cb( songs );
-        })
-        .catch( e => {
-          emsg.push( 'Try again, or check your internet connection.' );
-          emsg.push( 'Status: '+ String( e.message || 'Songs API Error' ) +'.' );
-          this.setError( 'songs', emsg.join( ' ' ) );
-        });
-      },
-  
-      // run maintenance tasks on a timer
-      setupMaintenance() {
-        this.itv = setInterval( () => {
-          this.getChannels(); // update channels
-          this.fetchSongs( this.channel ); // update channel tracks
-          // ...
-        }, 1000 * 30 );
-      },
-  
-      // setup animation canvas
-      setupCanvas() {
-        if ( !this.$refs.playerWrap ) return;
-        if ( !this.$refs.playerCanvas ) return;
-        // default canvas and player dimensions
-        const player = this.$refs.playerWrap;
-        const canvas = this.$refs.playerCanvas;
-        // setup THREE renderer and replace default canvas
-        this.fxBox = player.getBoundingClientRect();
-        this.fxScene = new THREE.Scene();
-        this.fxRenderer = new THREE.WebGLRenderer( { alpha: true, antialias: true, precision: 'highp' } );
-        this.fxRenderer.setClearColor( 0x000000, 0 );
-        this.fxRenderer.setPixelRatio( window.devicePixelRatio );
-        this.fxRenderer.domElement.className = canvas.className;
-        // setup camera
-        this.fxCamera = new THREE.PerspectiveCamera( 60, ( this.fxBox.width / this.fxBox.height ), 0.1, 20000 );
-        this.fxCamera.lookAt( this.fxScene.position );
-        this.fxCamera.position.set( 0, 0, 300 );
-        this.fxCamera.rotation.set( 0, 0, 0 );
-        // light color
-        this.fxColor = new THREE.Color();
-        this.fxColor.setHSL( this.fxHue, 1, .5 );
-        // setup light source
-        this.fxLight = new THREE.PointLight( 0xffffff, 4, 400 );
-        this.fxLight.position.set( 0, 0, 420 );
-        this.fxLight.castShadow = false;
-        this.fxLight.target = this.fxScene;
-        this.fxLight.color = this.fxColor;
-        this.fxScene.add( this.fxLight );
-        // setup canvas and events
-        canvas.parentNode.replaceChild( this.fxRenderer.domElement, canvas );
-        window.addEventListener( 'mousemove', this.updateMousePosition );
-        window.addEventListener( 'resize', this.updateStageSize );
-        // add objects
-        this.fxObjects.push( Sphere );
-        // setup objects and start animation
-        for ( let o of this.fxObjects ) o.create( this.fxBox, this.fxScene );
-        this.updateStageSize();
-        this.updateAnimations();
-      },
-  
-      // update mouse position from center of canvas
-      updateMousePosition( e ) {
-        if ( !this.fxBox || !e ) return;
-        this.fxMouse.x = Math.max( 0, e.pageX || e.clientX || 0 ) - ( this.fxBox.left + ( this.fxBox.width / 2 ) );
-        this.fxMouse.y = Math.max( 0, e.pageY || e.clientY || 0 ) - ( this.fxBox.top + ( this.fxBox.height / 2 ) );
-      },
-  
-      // update canvas size
-      updateStageSize() {
-        if ( !this.$refs.playerWrap || !this.fxRenderer ) return;
-        this.fxBox = this.$refs.playerWrap.getBoundingClientRect();
-        this.fxCamera.aspect = ( this.fxBox.width / this.fxBox.height );
-        this.fxCamera.updateProjectionMatrix();
-        this.fxRenderer.setSize( this.fxBox.width, this.fxBox.height );
-      },
-  
-      // update light color based on audio freq
-      updateStageLight() {
-        let dist  = Math.floor( this.freqData[ 1 ] | 0 ) / 255;
-        let color = Math.floor( this.freqData[ 16 ] | 0 ) / 255;
-        this.fxLight.distance = 360 + ( 140 * dist );
-        this.fxColor.setHSL( color, .5, .5 );
-      },
-  
-      // update custom objects in 3d scene
-      updateSceneObjects() {
-        for ( let o of this.fxObjects ) {
-          o.update( this.fxBox, this.fxMouse, this.freqData );
-        }
-      },
-  
-      // audio visualizer animation loop
-      updateAnimations() {
-        this.anf = requestAnimationFrame( this.updateAnimations );
-        if ( !this.fxRenderer || !this.fxCamera || !this.analyser || !this.freqData ) return;
-        this.analyser.getByteFrequencyData( this.freqData );
-        this.updateSceneObjects();
-        this.updateStageLight();
-        this.fxRenderer.render( this.fxScene, this.fxCamera );
-      },
-  
-      // setup audio routing and stream events
-      setupAudio() {
-        // setup audio sources
-        this.audioSrc  = this.context.createMediaElementSource( this.audio );
-        this.audioGain = this.context.createGain();
-        this.analyser  = this.context.createAnalyser();
-        // connect sources
-        this.audioSrc.connect( this.audioGain );
-        this.audioSrc.connect( this.analyser );
-        this.audioGain.connect( this.context.destination );
-        this.setVolume( this.volume );
-        // check when stream can start playing
-        this.audio.addEventListener( 'canplay', e => {
-          this.audio.play();
-          this.freqData = new Uint8Array( this.analyser.frequencyBinCount );
-        });
-        // check if stream is buffering
-        this.audio.addEventListener( 'waiting', e => {
-          this.playing = false;
-          this.loading = true;
-        });
-        // check if stream is done buffering
-        this.audio.addEventListener( 'playing', e => {
-          this.setError( 'stream', '' );
-          this.playing = true;
-          this.loading = false;
-        });
-        // check if stream has ended
-        this.audio.addEventListener( 'ended', e => {
-          this.playing = false;
-          this.loading = false;
-        });
-        // check for steam error
-        this.audio.addEventListener( 'error', e => {
-          let emsg = [];
-          emsg.push( 'The selected audio stream could not load, or has stopped loading.' );
-          emsg.push( 'Try again, or check your internet connection.' );
-          emsg.push( 'Status: '+ String( e.message || 'Stream URL Error' ) +'.' );
-          this.setError( 'stream', emsg.join( ' ' ) );
-          this.playing = false;
-          this.loading = false;
-        });
-      },
-  
-      // set audio volume
-      setVolume( volume ) {
-        if ( !this.audioGain ) return;
-        volume = parseFloat( volume ) || 0;
-        volume = ( volume < 0 ) ? 0 : volume;
-        volume = ( volume > 1 ) ? 1 : volume;
-        this.audioGain.gain.value = volume;
-      },
-  
-      // checks is a channel is currently selected
-      isCurrentChannel( channel ) {
-        if ( !channel || !channel.id || !this.channel.id ) return false;
-        if ( this.channel.id !== channel.id ) return false;
-        return true;
-      },
-  
-      // play audio stream for a channel
-      playChannel( channel ) {
-        if ( this.playing ) return;
-        this.clearErrors();
-        this.audio.src = channel.mp3file +'/?x='+ Date.now();
-        this.audio.crossOrigin = 'anonymous';
-        this.audio.load();
-      },
-  
-      // select a channel to play
-      selectChannel( channel ) {
-        if ( !channel || !channel.id ) return;
-        if ( this.isCurrentChannel( channel ) ) return;
-        this.closeAudio();
-        this.toggleSidebar( false );
-        this.playChannel( channel );
-        this.fetchSongs( channel );
-        this.channel = channel;
-      },
-  
-      // close active audio
-      closeAudio() {
-        this.setError( 'stream', '' );
-        try { this.audio.pause(); } catch ( e ) {}
-        try { this.audio.stop(); } catch ( e ) {}
-        try { this.audio.close(); } catch ( e ) {}
-        this.playing = false;
-      },
-  
-      // start tracking playback time
-      startClock() {
-        this.stopClock();
-        this.timeStart = Date.now();
-        this.timeItv = setInterval( this.updateClock, 1000 );
-        this.updateClock();
-      },
-  
-      // update tracking playback time
-      updateClock() {
-        let p = n => ( n < 10 ) ? '0'+n : ''+n;
-        let elapsed = ( Date.now() - this.timeStart ) / 1000;
-        let seconds = Math.floor( elapsed % 60 );
-        let minutes = Math.floor( elapsed / 60 % 60 );
-        let hours   = Math.floor( elapsed / 3600 );
-        this.timeDisplay = p( hours ) +':'+ p( minutes ) +':'+ p( seconds );
-      },
-  
-      // stop tracking playback time
-      stopClock() {
-        if ( this.timeItv ) clearInterval( this.timeItv );
-        this.timeItv = null;
-      },
-  
-      // clear timer refs
-      clearTimers() {
-        if ( this.sto ) clearTimeout( this.sto );
-        if ( this.itv ) clearInterval( this.itv );
-        if ( this.anf ) cancelAnimationFrame( this.anf );
-      },
-    },
-  
-    // on app mounted
-    mounted() {
-      this.getChannels();
-      this.setupAudio();
-      this.setupMaintenance();
-    },
-  
-    // on app destroyed
-    destroyed() {
-      this.closeAudio();
-      this.clearTimers();
+        // initialize playlist and controls
+        var index = 0,
+            playing = false,
+            mediaPath = 'https://archive.org/download/mythium/',
+            extension = '',
+            tracks = [{
+                "track": 1,
+                "name": "All This Is - Joe L.'s Studio",
+                "duration": "2:46",
+                "file": "JLS_ATI"
+            }, {
+                "track": 2,
+                "name": "The Forsaken - Broadwing Studio (Final Mix)",
+                "duration": "8:30",
+                "file": "BS_TF"
+            }, {
+                "track": 3,
+                "name": "All The King's Men - Broadwing Studio (Final Mix)",
+                "duration": "5:01",
+                "file": "BS_ATKM"
+            }, {
+                "track": 4,
+                "name": "The Forsaken - Broadwing Studio (First Mix)",
+                "duration": "8:31",
+                "file": "BSFM_TF"
+            }, {
+                "track": 5,
+                "name": "All The King's Men - Broadwing Studio (First Mix)",
+                "duration": "5:05",
+                "file": "BSFM_ATKM"
+            }, {
+                "track": 6,
+                "name": "All This Is - Alternate Cuts",
+                "duration": "2:48",
+                "file": "AC_ATI"
+            }, {
+                "track": 7,
+                "name": "All The King's Men (Take 1) - Alternate Cuts",
+                "duration": "5:44",
+                "file": "AC_ATKMTake_1"
+            }, {
+                "track": 8,
+                "name": "All The King's Men (Take 2) - Alternate Cuts",
+                "duration": "5:26",
+                "file": "AC_ATKMTake_2"
+            }, {
+                "track": 9,
+                "name": "Magus - Alternate Cuts",
+                "duration": "5:46",
+                "file": "AC_M"
+            }, {
+                "track": 10,
+                "name": "The State Of Wearing Address (fucked up) - Alternate Cuts",
+                "duration": "5:25",
+                "file": "AC_TSOWAfucked_up"
+            }, {
+                "track": 11,
+                "name": "Magus - Popeye's (New Years '04 - '05)",
+                "duration": "5:53",
+                "file": "PNY04-05_M"
+            }, {
+                "track": 12,
+                "name": "On The Waterfront - Popeye's (New Years '04 - '05)",
+                "duration": "4:40",
+                "file": "PNY04-05_OTW"
+            }, {
+                "track": 13,
+                "name": "Trance - Popeye's (New Years '04 - '05)",
+                "duration": "13:15",
+                "file": "PNY04-05_T"
+            }, {
+                "track": 14,
+                "name": "The Forsaken - Popeye's (New Years '04 - '05)",
+                "duration": "8:12",
+                "file": "PNY04-05_TF"
+            }, {
+                "track": 15,
+                "name": "The State Of Wearing Address - Popeye's (New Years '04 - '05)",
+                "duration": "7:02",
+                "file": "PNY04-05_TSOWA"
+            }, {
+                "track": 16,
+                "name": "Magus - Popeye's (Valentine's Day '05)",
+                "duration": "5:43",
+                "file": "PVD_M"
+            }, {
+                "track": 17,
+                "name": "Trance - Popeye's (Valentine's Day '05)",
+                "duration": "10:45",
+                "file": "PVD_T"
+            }, {
+                "track": 18,
+                "name": "The State Of Wearing Address - Popeye's (Valentine's Day '05)",
+                "duration": "5:36",
+                "file": "PVD_TSOWA"
+            }, {
+                "track": 19,
+                "name": "All This Is - Smith St. Basement (01/08/04)",
+                "duration": "2:48",
+                "file": "SSB01_08_04_ATI"
+            }, {
+                "track": 20,
+                "name": "Magus - Smith St. Basement (01/08/04)",
+                "duration": "5:46",
+                "file": "SSB01_08_04_M"
+            }, {
+                "track": 21,
+                "name": "Beneath The Painted Eye - Smith St. Basement (06/06/03)",
+                "duration": "13:07",
+                "file": "SSB06_06_03_BTPE"
+            }, {
+                "track": 22,
+                "name": "Innocence - Smith St. Basement (06/06/03)",
+                "duration": "5:16",
+                "file": "SSB06_06_03_I"
+            }, {
+                "track": 23,
+                "name": "Magus - Smith St. Basement (06/06/03)",
+                "duration": "5:46",
+                "file": "SSB06_06_03_M"
+            }, {
+                "track": 24,
+                "name": "Madness Explored - Smith St. Basement (06/06/03)",
+                "duration": "4:51",
+                "file": "SSB06_06_03_ME"
+            }, {
+                "track": 25,
+                "name": "The Forsaken - Smith St. Basement (06/06/03)",
+                "duration": "8:43",
+                "file": "SSB06_06_03_TF"
+            }, {
+                "track": 26,
+                "name": "All This Is - Smith St. Basement (12/28/03)",
+                "duration": "3:00",
+                "file": "SSB12_28_03_ATI"
+            }, {
+                "track": 27,
+                "name": "Magus - Smith St. Basement (12/28/03)",
+                "duration": "6:09",
+                "file": "SSB12_28_03_M"
+            }, {
+                "track": 28,
+                "name": "Madness Explored - Smith St. Basement (12/28/03)",
+                "duration": "5:05",
+                "file": "SSB12_28_03_ME"
+            }, {
+                "track": 29,
+                "name": "Trance - Smith St. Basement (12/28/03)",
+                "duration": "12:32",
+                "file": "SSB12_28_03_T"
+            }, {
+                "track": 30,
+                "name": "The Forsaken - Smith St. Basement (12/28/03)",
+                "duration": "8:56",
+                "file": "SSB12_28_03_TF"
+            }, {
+                "track": 31,
+                "name": "All This Is (Take 1) - Smith St. Basement (Nov. '03)",
+                "duration": "4:55",
+                "file": "SSB___11_03_ATITake_1"
+            }, {
+                "track": 32,
+                "name": "All This Is (Take 2) - Smith St. Basement (Nov. '03)",
+                "duration": "5:45",
+                "file": "SSB___11_03_ATITake_2"
+            }, {
+                "track": 33,
+                "name": "Beneath The Painted Eye (Take 1) - Smith St. Basement (Nov. '03)",
+                "duration": "14:05",
+                "file": "SSB___11_03_BTPETake_1"
+            }, {
+                "track": 34,
+                "name": "Beneath The Painted Eye (Take 2) - Smith St. Basement (Nov. '03)",
+                "duration": "13:25",
+                "file": "SSB___11_03_BTPETake_2"
+            }, {
+                "track": 35,
+                "name": "The Forsaken (Take 1) - Smith St. Basement (Nov. '03)",
+                "duration": "8:37",
+                "file": "SSB___11_03_TFTake_1"
+            }, {
+                "track": 36,
+                "name": "The Forsaken (Take 2) - Smith St. Basement (Nov. '03)",
+                "duration": "8:36",
+                "file": "SSB___11_03_TFTake_2"
+            }],
+            buildPlaylist = $.each(tracks, function(key, value) {
+                var trackNumber = value.track,
+                    trackName = value.name,
+                    trackDuration = value.duration;
+                if (trackNumber.toString().length === 1) {
+                    trackNumber = '0' + trackNumber;
+                }
+                $('#plList').append('<li> \
+                    <div class="plItem"> \
+                        <span class="plNum">' + trackNumber + '.</span> \
+                        <span class="plTitle">' + trackName + '</span> \
+                        <span class="plLength">' + trackDuration + '</span> \
+                    </div> \
+                </li>');
+            }),
+            trackCount = tracks.length,
+            npAction = $('#npAction'),
+            npTitle = $('#npTitle'),
+            audio = $('#audio1').on('play', function () {
+                playing = true;
+                npAction.text('Now Playing...');
+            }).on('pause', function () {
+                playing = false;
+                npAction.text('Paused...');
+            }).on('ended', function () {
+                npAction.text('Paused...');
+                if ((index + 1) < trackCount) {
+                    index++;
+                    loadTrack(index);
+                    audio.play();
+                } else {
+                    audio.pause();
+                    index = 0;
+                    loadTrack(index);
+                }
+            }).get(0),
+            btnPrev = $('#btnPrev').on('click', function () {
+                if ((index - 1) > -1) {
+                    index--;
+                    loadTrack(index);
+                    if (playing) {
+                        audio.play();
+                    }
+                } else {
+                    audio.pause();
+                    index = 0;
+                    loadTrack(index);
+                }
+            }),
+            btnNext = $('#btnNext').on('click', function () {
+                if ((index + 1) < trackCount) {
+                    index++;
+                    loadTrack(index);
+                    if (playing) {
+                        audio.play();
+                    }
+                } else {
+                    audio.pause();
+                    index = 0;
+                    loadTrack(index);
+                }
+            }),
+            li = $('#plList li').on('click', function () {
+                var id = parseInt($(this).index());
+                if (id !== index) {
+                    playTrack(id);
+                }
+            }),
+            loadTrack = function (id) {
+                $('.plSel').removeClass('plSel');
+                $('#plList li:eq(' + id + ')').addClass('plSel');
+                npTitle.text(tracks[id].name);
+                index = id;
+                audio.src = mediaPath + tracks[id].file + extension;
+                updateDownload(id, audio.src);
+            },
+            updateDownload = function (id, source) {
+                player.on('loadedmetadata', function () {
+                    $('a[data-plyr="download"]').attr('href', source);
+                });
+            },
+            playTrack = function (id) {
+                loadTrack(id);
+                audio.play();
+            };
+        extension = audio.canPlayType('audio/mpeg') ? '.mp3' : audio.canPlayType('audio/ogg') ? '.ogg' : '';
+        loadTrack(index);
+    } else {
+        // no audio support
+        $('.column').addClass('hidden');
+        var noSupport = $('#audio1').text();
+        $('.container').append('<p class="no-support">' + noSupport + '</p>');
     }
-  });
-  
+});
